@@ -3,20 +3,26 @@ import symfem
 import sympy as sp
 from sympy import lambdify
 
-class LagrangeElement:
+class AetherElement:
     
-    def __init__(self, degree):
+    def __init__(self, type, degree):
         """
         Implementation of an equidistant Lagrange finite element of arbitrary order. 
 
         Parameters
         ----------
+        type : str 
+            The type of finite element. 
         degree : int
             The degree of the finite element / polynomial degree of basis functions. 
+            
         """
         
+        if not type in ['Lagrange', 'discontinuous Taylor']:
+            raise ValueError("Invlaid element type.")
+        
         # The symfem definition of the element
-        self.element = symfem.create_element('triangle', 'Lagrange', degree)
+        self.element = symfem.create_element('triangle', type, degree)
         
         self.basis_functions = self.element.get_basis_functions()
         

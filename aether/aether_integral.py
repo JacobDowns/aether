@@ -1,40 +1,44 @@
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
-from aether_functions import QuadratureFunction
+from aether.aether_functions import QuadratureFunction
 
 class TestIntegral(nn.Module):
     
-    def __init__(self, v : QuadratureFunction):
+    def __init__(self, v : QuadratureFunction, device='cuda'):
         """
-        This module performs integrals of a quadrature function with a set of test functions.
+        This module performs integration of a function multiplied by a set of test functions.
 
         Parameters
         ----------
         v : QuadratureFunction
             A quadrature function whose basis forms the test functions.
-        quad_weights: tensor
-            A
         """
         
         super(TestIntegral, self).__init__()
         
+        # The test function 
         self.v = v
-
+    
         mesh = v.func_builder.mesh
         func_builder = v.func_builder
         
-        # Necessary mesh information for computing integrals
-        self.det_A = torch.tensor(mesh.det_A, dtype=torch.float32)
-        self.faces = torch.tensor(mesh.faces, dtype=torch.int64)
-        #self.faces_to_edges = torch.tensor(mesh.faces_to_edges, dtype=torch.int64)
-        self.faces_to_edges = torch.tensor(func_builder.mesh.faces_to_edges[:,[1,2,0]], dtype=torch.int64)
-        self.faces_to_edge_orientation = torch.tensor(mesh.faces_to_edge_orientation, dtype=torch.int64)
+        ### Get necessary mesh information for computing integrals
+        #####################################################
         
-        # These are basis function evaluated at quadrature points
+        # Determinant of transformation matrices from physical to mesh element
+        self.det_A = torch.tensor(mesh.det_A, dtype=torch.float32, device=device)
+        # Array of mesh faces
+        self.faces = torch.tensor(mesh.faces, dtype=torch.int64, device=device)
+        # Array mapping each face to each of its edges
+        self.faces_to_edges = torch.tensor(func_builder.mesh.faces_to_edges[:,[1,2,0]], dtype=torch.int64, device=device)
+        # An array representing orientation of each edge
+        self.faces_to_edge_orientation = torch.tensor(mesh.faces_to_edge_orientation, dtype=torch.int64, device=device)
+        
+        # A tensor containing a list of test function evaluated at quadrature weights 
         self.v_x = v.y
         # Quadrature weights
-        self.quad_weights = v.quad_weights
+        self.quad_weights = torch.tensor(v.mesh_quad.quad_weights, dtype=torch.float32, device=device)
         
         self.dofs_per_vertex = func_builder.torch_lagrange.dofs_per_vertex
         self.dofs_per_edge = func_builder.torch_lagrange.dofs_per_edge
@@ -115,6 +119,9 @@ class TestIntegral(nn.Module):
         
         
         return d
+    
+
+        
     
     
         
