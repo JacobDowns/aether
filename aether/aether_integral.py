@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
-from aether.aether_functions import QuadratureFunction
+from aether.aether_functions import QuadratureFunction, FunctionBuilder
 
 class TestIntegral(nn.Module):
     
-    def __init__(self, v : QuadratureFunction, device='cuda'):
+    def __init__(self, f : QuadratureFunction, v : QuadratureFunction, device='cuda'):
         """
         This module performs integration of a function multiplied by a set of test functions.
 
@@ -17,6 +17,8 @@ class TestIntegral(nn.Module):
         
         super(TestIntegral, self).__init__()
         
+        # The quadrature function to integrate
+        self.f = f 
         # The test function 
         self.v = v
     
@@ -37,22 +39,23 @@ class TestIntegral(nn.Module):
         
         # A tensor containing a list of test function evaluated at quadrature weights 
         self.v_x = v.y
+        
         # Quadrature weights
         self.quad_weights = torch.tensor(v.mesh_quad.quad_weights, dtype=torch.float32, device=device)
         
-        self.dofs_per_vertex = func_builder.torch_lagrange.dofs_per_vertex
-        self.dofs_per_edge = func_builder.torch_lagrange.dofs_per_edge
-        self.dofs_per_face = func_builder.torch_lagrange.dofs_per_face
+        self.dofs_per_vertex = func_builder.aether_element.dofs_per_vertex
+        self.dofs_per_edge = func_builder.aether_element.dofs_per_edge
+        self.dofs_per_face = func_builder.aether_element.dofs_per_face
         
         
-    def forward(self, f_x):
+    def forward(self):
         """
         Takes in a function f evaluated at quadrature points f_x and computes integrals of f*v_i
-        for all test functions v_i. 
+        for all test functions v_i, also evaluated at quadrature points. 
 
         Keyword Agruments:
         ----------
-        f_x : tensor
+        f : QuadratureFunction
             A tensor of the function f evaluated at quadrature points. Has shape
             num cells x num quadrature points
     
@@ -69,6 +72,8 @@ class TestIntegral(nn.Module):
         ######################################################################
         
         v_x = self.v_x
+        f_x = self.f()
+        
         # For each cell multiply the function f at quadrature points x by each of the basis function in v
         # evaluated at quadrature points x
         I_x = f_x[:, None, :]*v_x
@@ -92,10 +97,10 @@ class TestIntegral(nn.Module):
         ### Compute integrals for "edge test functions" (DOFs on edge)
         ######################################################################
 
+        edge_start = 3*self.dofs_per_vertex
+        edge_end = edge_start + 3*self.dofs_per_edge
         if self.dofs_per_edge > 0:
          
-            edge_start = 3*self.dofs_per_vertex
-            edge_end = edge_start + 3*self.dofs_per_edge
             I_x_edge = I_x[:,edge_start:edge_end]
             I_x_edge = I_x_edge.reshape(I_x_edge.shape[0], 3, -1)
 
@@ -117,9 +122,46 @@ class TestIntegral(nn.Module):
             face_dofs = I_x[:,edge_end:]
             d['face_dofs'] = face_dofs
         
-        
         return d
     
+
+class DomainIntegral(nn.Module):
+    
+    def __init__(self, f : QuadratureFunction, device='cuda'):
+        """
+        Performs an integral of a quadrature function over the mesh domain. 
+        """
+        
+        super(DomainIntegral, self).__init__()
+        
+        self.f = f
+        func_builder = f.func_builder
+        mesh = func_builder.mesh 
+        
+
+        # Mesh info. 
+                
+        # Determinant of transformation matrices from physical to mesh element
+        self.det_A = torch.tensor(mesh.det_A, dtype=torch.float32, device=device)
+        # Quadrature weights
+        self.quad_weights = torch.tensor(f.mesh_quad.quad_weights, dtype=torch.float32, device=device)
+        
+        
+        
+        
+    def forward(self):
+        """
+        Integrates a quadrature function over the mesh domain. 
+    
+        Returns
+        -------
+        float: Integral of f over the mesh domain.
+        """
+        
+        f_x = self.f()
+        I = (f_x * self.quad_weights[None, :]).sum(axis=1)
+        I *= self.det_A
+        return I.sum()
 
         
     

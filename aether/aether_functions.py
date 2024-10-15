@@ -43,22 +43,9 @@ class QuadratureFunction(nn.Module):
         self.edge_dofs_shape = func_builder.edge_dofs_shape
         self.face_dofs_shape = func_builder.face_dofs_shape
         
-        if self.num_vertex_dofs > 0:
-            self.vertex_dof_positions = func_builder.vertex_dof_positions
-        
-        if self.num_edge_dofs > 0:
-            self.edge_dof_positions = func_builder.edge_dof_positions
-        
-        if self.num_face_dofs > 0:
-            self.face_dof_positions = func_builder.face_dof_positions
-        
-        
-    def forward(self, **kwargs):
         """
-        Evaluate the finite element function at quadrature points given the degrees of freedom. 
-
-        Keyword Agruments:
-        ----------
+        DOF Tensors:
+        
         vertex_dofs : tensor
             A tensor of values for all vertex dofs. The shape of this tensor is given by 
             num cells x 3 x dofs per vertex
@@ -70,34 +57,48 @@ class QuadratureFunction(nn.Module):
         face_dofs : tensor 
             A tensor of values for all face dofs. The shape of this tensor is given by 
             num cells x dofs per face
-    
+        """
+        
+        if self.num_vertex_dofs > 0:
+            self.vertex_dof_positions = torch.tensor(func_builder.vertex_dof_positions, dtype=torch.float32, device=device)
+            self.vertex_dofs = torch.zeros_like(self.vertex_dof_positions[:,0])
+        
+        if self.num_edge_dofs > 0:
+            self.edge_dof_positions = torch.tensor(func_builder.edge_dof_positions, dtype=torch.float32, device=device)
+            self.edge_dofs = torch.zeros_like(self.edge_dof_positions[:,:,0])
+        
+        if self.num_face_dofs > 0:
+            self.face_dof_positions = torch.tensor(func_builder.face_dof_positions, dtype=torch.float32, device=device)
+            self.face_dofs = torch.zeros_like(self.face_dof_positions[:,:,0])
+        
+        
+    def forward(self):
+        """
+        Evaluate the finite element function at quadrature points given the degrees of freedom. 
+
         Returns
         -------
         tensor
             A tensor of values with the finite element function evaluated at all quadrature points.
-            This tensor has shape 
-            num cells x num quadrature points per cell
+            This tensor has shape: num cells x num quadrature points per cell
         """
         
         local_dofs = []
         
         if self.num_vertex_dofs > 0:
-            vertex_dofs = kwargs['vertex_dofs']
-            local_vertex_dofs = vertex_dofs[self.faces]
+            local_vertex_dofs = self.vertex_dofs[self.faces]
             local_vertex_dofs = local_vertex_dofs.reshape(local_vertex_dofs.shape[0], -1)
             local_dofs.append(local_vertex_dofs)
         
         if self.num_edge_dofs > 0:    
-            edge_dofs = kwargs['edge_dofs']
-            local_edge_dofs = edge_dofs[self.faces_to_edges] 
+            local_edge_dofs = self.edge_dofs[self.faces_to_edges] 
             orientation = self.edge_orientation
             local_edge_dofs = local_edge_dofs*orientation[:,:,None] + local_edge_dofs.flip(dims=(2,))*(1 - orientation[:,:,None])
             local_edge_dofs = local_edge_dofs.reshape(local_edge_dofs.shape[0], -1)
             local_dofs.append(local_edge_dofs)
         
         if self.num_face_dofs > 0:
-            local_face_dofs = kwargs['face_dofs']
-            local_dofs.append(local_face_dofs)
+            local_dofs.append(self.face_dofs)
         
         # Compute weighted sums of basis functions
         local_dofs = torch.column_stack(local_dofs)        

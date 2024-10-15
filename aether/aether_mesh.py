@@ -72,14 +72,22 @@ class Mesh:
         # Compute per cell transformation matrices from the reference element
         # to each physical element as well as inverse transforms, and determinants for 
         # integration
-        self.set_cell_transforms()
+        self.set_cell_properties()
         
-    def set_cell_transforms(self):
+
+        
+        
+    def set_cell_properties(self):
         
         faces = self.faces
-        faces = faces[:,[0,1,2]]
-        X = self.coordinates[:,0][faces]
-        Y = self.coordinates[:,1][faces]
+        coordinates = self.coordinates
+        
+        """
+        Compute cell transforms from reference to physical elements. 
+        """
+        
+        X = coordinates[:,0][faces]
+        Y = coordinates[:,1][faces]
 
         B = np.c_[X[:,0], Y[:,0]]
         A = np.zeros((len(faces), 2, 2))
@@ -105,4 +113,65 @@ class Mesh:
         self.A_inv = A_inv
         self.det_A = det_A
         self.B = B
+        
+        """
+        For each face get tangent vectors, normal vectors, lengths, and midpoints of each edge. 
+        """
+        
+        # Tangent vectors
+        t = coordinates[faces[:,[1,2,0]]] - coordinates[faces[:,[0,1,2]]]
+        # Edge lengths
+        edge_lens = np.linalg.norm(t, axis=2)
+        # Normalize
+        t = t / edge_lens[:,:,np.newaxis]
+        # Edge midpoint coordinates
+        edge_midpoints =  0.5*(coordinates[faces[:,[1,2,0]]] + coordinates[faces[:,[0,1,2]]])
+        # Normal vectors 
+        n = np.stack([t[:,:,1], -t[:,:,0]], axis=-1)
+        
+        self.cell_tangents = t 
+        self.cell_normals = n
+        self.cell_edge_lens = edge_lens
+        self.cell_edge_midpoints = edge_midpoints
+        
+    
+    def get_dual_mesh(self):
+        
+        # Cell centroids
+        centroids = self.coordinates[self.faces].sum(axis=1) / 3.
+        
+        # Construct dual edges
+        dual_edges = np.zeros((self.num_edges, 2), dtype=int) - 1
+        edge_normals = np.zeros((self.num_edges, 2))
+        edge_lens = np.zeros(self.num_edges)
+        edge_midpoints = np.zeros((self.num_edges, 2))
+        # Cell / local edge index
+        
+        
+        
+        for i in range(len(self.faces_to_edges)):
+            face = self.faces_to_edges[i]
+            
+            for j in range(3):
+                edge = face[j]
+                n = self.cell_normals[i, j]
+                edge_len = self.cell_edge_lens[i,j]
+                edge_normals[edge] = n 
+                edge_lens[edge] = edge_len
+                edge_midpoints[edge] = self.cell_edge_midpoints[i,j]
+                
+                if dual_edges[edge,0] < 0:
+                    dual_edges[edge,0] = i 
+                else:
+                    dual_edges[edge,1] = i 
+                    
+        indexes = np.logical_and(dual_edges[:,0] >= 0, dual_edges[:,1] < 0)
+        
+        # Add self edges
+        dual_edges[indexes,1] = dual_edges[indexes,0]
+        
+        return centroids, dual_edges, edge_normals, edge_lens
+            
+            
+        
  
