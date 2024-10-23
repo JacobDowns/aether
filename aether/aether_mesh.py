@@ -18,7 +18,6 @@ class Mesh:
       
         """
         
-        
         self.coordinates = coordinates
         self.faces = faces
         
@@ -133,9 +132,10 @@ class Mesh:
         self.cell_normals = n
         self.cell_edge_lens = edge_lens
         self.cell_edge_midpoints = edge_midpoints
+        self.cell_areas = np.absolute(det_A) / 2.
         
     
-    def get_dual_mesh(self):
+    def get_dual_mesh(self, self_edges=False):
         
         # Cell centroids
         centroids = self.coordinates[self.faces].sum(axis=1) / 3.
@@ -145,10 +145,8 @@ class Mesh:
         edge_normals = np.zeros((self.num_edges, 2))
         edge_lens = np.zeros(self.num_edges)
         edge_midpoints = np.zeros((self.num_edges, 2))
+        
         # Cell / local edge index
-        
-        
-        
         for i in range(len(self.faces_to_edges)):
             face = self.faces_to_edges[i]
             
@@ -165,12 +163,17 @@ class Mesh:
                 else:
                     dual_edges[edge,1] = i 
                     
+                    
         indexes = np.logical_and(dual_edges[:,0] >= 0, dual_edges[:,1] < 0)
-        
-        # Add self edges
-        dual_edges[indexes,1] = dual_edges[indexes,0]
-        
-        return centroids, dual_edges, edge_normals, edge_lens
+        if self_edges:
+            dual_edges[indexes,1] = dual_edges[indexes,0]
+        else:
+            dual_edges = dual_edges[~indexes]
+            edge_normals = edge_normals[~indexes]
+            edge_lens = edge_lens[~indexes]
+            edge_midpoints = edge_midpoints[~indexes]
+            
+        return centroids, dual_edges, edge_normals, edge_lens, edge_midpoints
             
             
         
