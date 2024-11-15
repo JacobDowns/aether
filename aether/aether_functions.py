@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import itertools
-from aether.aether_element import AetherElement
+from aether.aether_element import Element
 from aether.aether_mesh import Mesh
 from aether.aether_quadrature import ReferenceQuadrature, MeshQuadrature
 
@@ -110,7 +110,7 @@ class QuadratureFunction(nn.Module):
 
 class FunctionBuilder:
       
-    def __init__(self, mesh : Mesh, element : AetherElement):
+    def __init__(self, mesh : Mesh, element : Element):
             
         """
         Object that is used to create quadrature functions for a Lagrange element of given degree on a mesh.
@@ -143,7 +143,11 @@ class FunctionBuilder:
         self.num_edge_dofs = 0
         self.edge_dofs_shape = (0,0)
         if self.aether_element.dofs_per_edge > 0:
-            t = self.aether_element.edge_dof_positions[:,0]
+            if self.aether_element.ref_element == 'triangle':
+                t = self.aether_element.edge_dof_positions[2][:,0]
+            elif self.aether_element.ref_element == 'interval':
+                t = self.aether_element.edge_dof_positions[0].flatten()
+            
             coords0 = mesh.coordinates[mesh.edges_to_vertices[:,0]]
             coords1 = mesh.coordinates[mesh.edges_to_vertices[:,1]]
             self.edge_dof_positions = coords1[:,np.newaxis,:]*t[np.newaxis,:,np.newaxis] + coords0[:,np.newaxis,:]*(1.-t[np.newaxis,:,np.newaxis])
@@ -155,7 +159,7 @@ class FunctionBuilder:
         self.num_face_dofs = 0
         self.face_dofs_shape = (0,0)
         if self.aether_element.dofs_per_face > 0:
-            self.face_dof_positions = np.matmul(self.mesh.A, self.aether_element.face_dof_positions.T) + self.mesh.B[:,:,np.newaxis]
+            self.face_dof_positions = np.matmul(self.mesh.A, self.aether_element.face_dof_positions[0].T) + self.mesh.B[:,:,np.newaxis]
             self.face_dof_positions = np.stack([self.face_dof_positions[:,0,:], self.face_dof_positions[:,1,:]], axis=2)
             self.face_dofs_shape = self.face_dof_positions[:,:,0].shape
             self.num_face_dofs = self.face_dof_positions[:,:,0].size
@@ -164,7 +168,7 @@ class FunctionBuilder:
         self.dof_positions = np.concatenate(dof_positions)
                 
             
-    def get_function(self, quadrature : ReferenceQuadrature, *args):
+    def get_function(self, quadrature : ReferenceQuadrature, derivatives = []):
         
         """
         Returns a quadrature function for a set of quadrature points. Derivatives for each coordinate dimension
@@ -175,13 +179,9 @@ class FunctionBuilder:
         quad_points : ndarray
             A set of quadrature points defined on the reference element of shape  
             num quadrature points x 2
-        
-        
-        Additional Arguments
-        ----------
-        (d1, d2 ...)
-            An optional, variable length tuple of 0 or 1 values. 0 denotes a derivative in the x direction, 1 in the y direction.
-            For instance, to take the x y derivative input 0 1 or 1 1 for the y y derivative. 
+        derivatives : list of strings
+            A list of derivatives to take for each basis function. For example, use eval_func(points, ['x', 'y']) to get the xy partial 
+            derivatives. Can be left blank for no derivatives. 
             
         Returns
         -------
@@ -191,19 +191,60 @@ class FunctionBuilder:
         """
         
         quad_points = quadrature.quad_points
-
-        # Evaluate all basis functions on each mesh cell. 
-        Y = []
-        for c in itertools.product(*([[0, 1]]*len(args))):
-            w = np.prod(self.mesh.A_inv[:,c,args], axis=1)
-            du = self.aether_element.eval_func(quad_points, *c)            
-            yi = w[:,np.newaxis,np.newaxis] * du
-            Y.append(yi)
         
-        y = np.array(Y).sum(axis=0)
+        if self.aether_element.ref_element == 'triangle':
+            indexes = [[0,1]]
+        elif self.aether_element.ref_element == 'interval':
+            indexes=[[0]]
+        
+        # Dimension of the range
+        D = self.aether_element.range_dim
+        # If derivatives aren't specified, just initialize empty lists for each range dimension
+        if len(derivatives) == 0:
+            derivatives = [[] for i in range(D)]
+        
+        
+        symbol_dict = {'x' : 0, 'y' : 1}
+        
+        Y = []
+        for d in range(D):
+            
+            ds = derivatives[d]
+            ds_indexes = [symbol_dict[s] for s in ds]
+
+            # Evaluate all basis functions on each mesh cell. 
+            y_d = []
+            
+            """
+            Evaluating derivatives in physical coordinates requires some somwehat unpleasant 
+            chain ruling. See:
+            https://scicomp.stackexchange.com/questions/25196/implementing-higher-order-derivatives-for-finite-element 
+            """
+            if self.aether_element.ref_element == 'triangle':
+                
+                for coord_dim in itertools.product(*(indexes*len(ds))):
+                    # Weights are products of entries of the transform matrix
+                    w = np.prod(self.mesh.A_inv[:, coord_dim, ds_indexes], axis=1)
+                    du = self.aether_element.eval_basis(quad_points, ds, d=d)            
+                    yi = w[:,np.newaxis,np.newaxis] * du
+                    y_d.append(yi)
+                
+                y_d = np.array(y_d).sum(axis=0)
+            elif self.aether_element.ref_element == 'interval':
+                #w = self.mesh.cell_edge_lens 
+                # Need inverse of edge lens for transform?
+                du = self.aether_element.eval_basis(quad_points, ds, d=d)       
+            
+            
+            Y.append(y_d)
+        
+        # Combine any vector outputs into a single array
+        Y = np.stack(Y, axis=-1)
         
         # Extend quadrature to whole mesh 
-        mesh_quad = MeshQuadrature(self.mesh, quadrature) 
+        #mesh_quad = MeshQuadrature(self.mesh, quadrature) 
     
-        f = QuadratureFunction(y, mesh_quad, self)
-        return f
+        return Y
+        #f = QuadratureFunction(Y, mesh_quad, self)
+        #return f
+   

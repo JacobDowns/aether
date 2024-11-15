@@ -2,301 +2,126 @@ import numpy as np
 import symfem 
 import sympy as sp
 from sympy import lambdify
+from numpy.typing import NDArray
 
-class AetherElement:
+class Element:
     
-    def __init__(self, type, degree):
-        """
-        Implementation of an equidistant Lagrange finite element of arbitrary order. 
-
-        Parameters
-        ----------
-        type : str 
-            The type of finite element. 
-        degree : int
-            The degree of the finite element / polynomial degree of basis functions. 
-            
-        """
+    def __init__(self, type : str, degree : int, ref_element='triangle'):
         
-        if not type in ['Lagrange', 'discontinuous Taylor']:
-            raise ValueError("Invlaid element type.")
-        
+        # Type of reference element 
+        self.ref_element = ref_element 
         # The symfem definition of the element
-        self.element = symfem.create_element('triangle', type, degree)
-        
+        self.element = symfem.create_element(ref_element, type, degree)
+        # Get basis function 
         self.basis_functions = self.element.get_basis_functions()
+         # Number of basis functions
+        self.N = len(self.basis_functions)
+        # Number of components of basis functions (scalar v. vector)
+        self.range_dim = self.element.range_dim
         
         dof_dims, dof_entities = list(zip(*self.element.dof_entities()))
         self.dof_dims = np.array(dof_dims, dtype=int)
         self.dof_entities = np.array(dof_entities, dtype=int)
         
-        self.dofs_per_vertex = int(np.sum(self.dof_dims == 0) / 3)
-        self.dofs_per_edge = int(np.sum(self.dof_dims == 1) / 3)
-        self.dofs_per_face = int(np.sum(self.dof_dims == 2))
+        if ref_element == 'interval':
+            self.num_vertices = 2
+            self.num_edges = 1
+            self.num_faces = 0
+        elif ref_element == 'triangle':
+            self.num_vertices = 3
+            self.num_edges = 3
+            self.num_faces = 1
+            
+        self.dofs_per_vertex = int(np.sum(self.dof_dims == 0) / self.num_vertices)
+        self.dofs_per_edge = int(np.sum(self.dof_dims == 1) / self.num_edges)
+        if self.num_faces > 0:
+            self.dofs_per_face = int(np.sum(self.dof_dims == 2))
+        else: 
+            self.dofs_per_face = 0
         
-        # Number of basis functions
-        self.N = len(self.basis_functions)
         
-        # Store range dimension 
-        self.range_dim = self.element.range_dim
-        
-        # Plot positions of dofs on each entity
-        vertex_dof_positions = []
-        edge_dof_positions = []
-        face_dof_positions = []
-
+        # For each entity of a given type (face, edge, vertex)
+        # create a list of its dof plot vertices 
+        vertex_dof_positions = [[] for i in range(self.num_vertices)]
+        edge_dof_positions = [[] for i in range(self.num_edges)]
+        face_dof_positions = [[] for i in range(self.num_faces)]
         for i in range(len(self.element.dof_entities())):
             dim, entity = self.element.dof_entities()[i]
             dof_x = self.element.dof_plot_positions()[i]
-            dof_x = [float(dof_x[0]), float(dof_x[1])]
+            dof_x = [float(d_i) for d_i in dof_x]
             
-            if dim == 0 and entity == 0:
-                vertex_dof_positions.append(dof_x)
-            
-            if dim == 1 and entity == 2:
-                edge_dof_positions.append(dof_x)
-                
-            if dim == 2 and entity == 0:
-                face_dof_positions.append(dof_x)
-                
+            if dim == 0:
+                vertex_dof_positions[entity].append(dof_x)
+            if dim == 1:
+                edge_dof_positions[entity].append(dof_x)
+            if dim == 2:
+                face_dof_positions[entity].append(dof_x)
+        
         self.vertex_dof_positions = np.array(vertex_dof_positions)
         self.edge_dof_positions = np.array(edge_dof_positions)
         self.face_dof_positions = np.array(face_dof_positions)
-
-    
-    def eval_func(self, points, *args):
+                
+     
+    def eval_basis(self, points : NDArray, derivatives = [], d=0):
         """
-        Evaluates all basis function of the element at a set of points within the reference element which has 
-        vertices (0,0), (1,0), (0,1).
+        Evaluates all basis function of the finite element. 
 
         Parameters
         ----------
         points : ndarray
             A set of 2D points of shape n x 2 within the reference element. 
-        
-        
-        Additional Arguments
-        ----------
-        d1, d2 ...
-            Additional integer arguments. Each di must be 0 or 1. 0 denotes a derivative in the x direction, 1 in the y direction.
-            For instance, to take the x y derivative of each basis function pass in eval_func(points, 0, 1). 
-            
+        derivatives : list of strings
+            A list of derivatives to take for each basis function. For example, use eval_func(points, ['x', 'y']) to get the xy partial 
+            derivatives. Can be left blank for no derivatives. 
+        d : int
+            Which component of the range to evaluate. 
+      
         Returns
         -------
         ndarray
-            All basis functions of the element evaluated at the given points. 
+            All basis functions evaluated at the given points. The final shape is N x P, where N is the number of basis functions
+            and P is the number of points. 
             
         """
-        
+                
+        # Map strings to symbols for sympy
         x, y = sp.symbols('x y')
-        axes = list(args)
+        symbol_dict = {'x' : x, 'y' : y}
+        derivatives = [symbol_dict[s] for s in derivatives]
         
-        coords = np.array([x, y])[axes]
+        # Interval and triangle elements have different domains so 
+        # make sure we have the correct format for points
+        num_points = len(points)
+        if self.ref_element == 'triangle':
+            points = [points[:,0], points[:,1]] 
+            domain = (x, y)
+        else:
+            points = [points.flatten()]
+            domain = (x,)
+        
+        # List to store all evaluated basis functions
         Z = []
-        
+ 
         for i in range(self.N):
+            # Get i-th basis function 
             f = self.basis_functions[i].as_sympy()
-            if len(axes) > 0:
-                f = sp.diff(f, *coords)
-            f = lambdify((x, y), f)
-            z = f(points[:,0], points[:,1])
             
+            if self.range_dim > 1:
+                f = f[d]
+            
+            # Differentiate the basis function 
+            if len(derivatives) > 0:
+                f = sp.diff(f, *derivatives)
+            
+            # Convert from a sympy function to a numerical representation
+            f = lambdify(tuple(domain), f)
+            # Evaluate the basis function at a set of points
+            z = f(*points)
+            
+            # Handle edge case where functions are constants
             if isinstance(z, (int, float)):
-                z = np.ones_like(points[:,0]) * z
-                
-            Z.append(z)
+                z = np.ones(num_points) * z
             
-        Z = np.array(Z)
-        return Z
-    
-    
-
-class AetherElement1:
-    
-    def __init__(self, type, degree):
-        """
-        Implementation of an equidistant Lagrange finite element of arbitrary order. 
-
-        Parameters
-        ----------
-        type : str 
-            The type of finite element. 
-        degree : int
-            The degree of the finite element / polynomial degree of basis functions. 
-            
-        """
-        
-        #if not type in ['Lagrange', 'discontinuous Taylor']:
-        #    raise ValueError("Invlaid element type.")
-        
-        # The symfem definition of the element
-        self.element = symfem.create_element('triangle', type, degree)
-        
-        self.basis_functions = self.element.get_basis_functions()
-        
-        dof_dims, dof_entities = list(zip(*self.element.dof_entities()))
-        self.dof_dims = np.array(dof_dims, dtype=int)
-        self.dof_entities = np.array(dof_entities, dtype=int)
-        
-        self.dofs_per_vertex = int(np.sum(self.dof_dims == 0) / 3)
-        self.dofs_per_edge = int(np.sum(self.dof_dims == 1) / 3)
-        self.dofs_per_face = int(np.sum(self.dof_dims == 2))
-        
-        # Number of basis functions
-        self.N = len(self.basis_functions)
-        self.range_dim = self.element.range_dim
-        
-        # Plot positions of dofs on each entity
-        vertex_dof_positions = []
-        edge_dof_positions = []
-        face_dof_positions = []
-
-        for i in range(len(self.element.dof_entities())):
-            dim, entity = self.element.dof_entities()[i]
-            dof_x = self.element.dof_plot_positions()[i]
-            dof_x = [float(dof_x[0]), float(dof_x[1])]
-            
-            if dim == 0 and entity == 0:
-                vertex_dof_positions.append(dof_x)
-            
-            if dim == 1 and entity == 2:
-                edge_dof_positions.append(dof_x)
-                
-            if dim == 2 and entity == 0:
-                face_dof_positions.append(dof_x)
-                
-        self.vertex_dof_positions = np.array(vertex_dof_positions)
-        self.edge_dof_positions = np.array(edge_dof_positions)
-        self.face_dof_positions = np.array(face_dof_positions)
-
-    
-    def eval_func_edge(self, points, *args):
-        """
-        Evaluates all basis function of the element at points on each edge of the reference triangle.
-        vertices (0,0), (1,0), (0,1).
-
-        Parameters
-        ----------
-        points : ndarray
-            A set of points on the reference interval [0, 1].
-        
-        
-        Additional Arguments
-        ----------
-        l1, l2, ...
-            Additional lists of integers. Each list must contain 0 or 1 only. 0 denotes a derivative in the x direction, 1 in the y direction.
-            For instance, to take the x y derivative of each basis function use in eval_func(points, [0,1]). For vector valued elements, 
-            you can specify lists for each component of the basis functions. For example use eval_func(points, [0], [1]) to take the x 
-            derivative of the x-component of each basis function and the y derivative of the y-components.  
-            
-        Returns
-        -------
-        ndarray
-            All basis functions of the element evaluated at the given points. 
-            
-        """
-        
-        # Define points on reference edges 0, 1, and 2. Canonically, edges are oriented from lower to higher vertices?
-        p0 = np.c_[
-            1. - points,
-            points            
-        ]
-        
-        p1 = np.c_[
-            points*0.,
-            points
-        ]
-        
-        p2 = np.c_[
-            points,
-            points*0.
-        ]
-        
-        return p0, p1, p2
-        return None 
-        x, y = sp.symbols('x y')
-        symbols = np.array([x, y])
-        derivatives = [symbols[t] for t in args]
-        
-        Z = []
-        for i in range(self.N):
-            f = self.basis_functions[i].as_sympy()
-            
-            z = []
-            for d in range(self.range_dim):
-                f_d = f[d]
-        
-                if len(derivatives) > 0:
-                    f_d = sp.diff(f_d, *derivatives[d])
-                
-                f_d = lambdify((x, y), f_d)
-                z_d = f_d(points[:,0], points[:,1])
-                
-                if isinstance(z_d, (int, float)):
-                    z_d = np.ones_like(points[:,0]) * z_d
-                
-                z.append(z_d)
-                
-            Z.append(z)
-            
-        Z = np.array(Z)
-        return Z
-
-        
-    
-    def eval_func_cell(self, points, *args):
-        """
-        Evaluates all basis function of the element at a set of points within the reference element which has 
-        vertices (0,0), (1,0), (0,1).
-
-        Parameters
-        ----------
-        points : ndarray
-            A set of 2D points of shape n x 2 within the reference element. 
-        
-        
-        Additional Arguments
-        ----------
-        l1, l2, ...
-            Additional lists of integers. Each list must contain 0 or 1 only. 0 denotes a derivative in the x direction, 1 in the y direction.
-            For instance, to take the x y derivative of each basis function use in eval_func(points, [0,1]). For vector valued elements, 
-            you can specify lists for each component of the basis functions. For example use eval_func(points, [0], [1]) to take the x 
-            derivative of the x-component of each basis function and the y derivative of the y-components.  
-            
-        Returns
-        -------
-        ndarray
-            All basis functions of the element evaluated at the given points. 
-            
-        """
-         
-        
-        x, y = sp.symbols('x y')
-        symbols = np.array([x, y])
-        derivatives = [symbols[t] for t in args]
-        
-        Z = []
-        for i in range(self.N):
-            f = self.basis_functions[i].as_sympy()
-            
-            z = []
-            for d in range(self.range_dim):
-                if self.range_dim == 1:
-                    f_d = f
-                else:
-                    f_d = f[d]
-        
-                if len(derivatives) > 0:
-                    f_d = sp.diff(f_d, *derivatives[d])
-                
-                f_d = lambdify((x, y), f_d)
-                z_d = f_d(points[:,0], points[:,1])
-                
-                if isinstance(z_d, (int, float)):
-                    z_d = np.ones_like(points[:,0]) * z_d
-                
-                z.append(z_d)
-                
             Z.append(z)
             
         Z = np.array(Z)
