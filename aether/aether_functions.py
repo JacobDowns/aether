@@ -5,6 +5,7 @@ import itertools
 from aether.aether_element import Element
 from aether.aether_mesh import Mesh
 from aether.aether_quadrature import ReferenceQuadrature, MeshQuadrature
+from numpy.typing import NDArray
 
 class QuadratureFunction(nn.Module):
     
@@ -147,10 +148,8 @@ class FunctionBuilder:
                 t = self.aether_element.edge_dof_positions[2][:,0]
             elif self.aether_element.ref_element == 'interval':
                 t = self.aether_element.edge_dof_positions[0].flatten()
-            
-            coords0 = mesh.coordinates[mesh.edges_to_vertices[:,0]]
-            coords1 = mesh.coordinates[mesh.edges_to_vertices[:,1]]
-            self.edge_dof_positions = coords1[:,np.newaxis,:]*t[np.newaxis,:,np.newaxis] + coords0[:,np.newaxis,:]*(1.-t[np.newaxis,:,np.newaxis])
+
+            self.edge_dof_positions = mesh.edge_transform(t)
             self.edge_dofs_shape = self.edge_dof_positions[:,:,0].shape
             self.num_edge_dofs = self.edge_dof_positions[:,:,0].size
             dof_positions.append(self.edge_dof_positions.reshape(-1,2))
@@ -159,16 +158,38 @@ class FunctionBuilder:
         self.num_face_dofs = 0
         self.face_dofs_shape = (0,0)
         if self.aether_element.dofs_per_face > 0:
-            self.face_dof_positions = np.matmul(self.mesh.A, self.aether_element.face_dof_positions[0].T) + self.mesh.B[:,:,np.newaxis]
+            self.face_dof_positions = mesh.cell_transform(self.aether_element.face_dof_positions[0])
             self.face_dof_positions = np.stack([self.face_dof_positions[:,0,:], self.face_dof_positions[:,1,:]], axis=2)
             self.face_dofs_shape = self.face_dof_positions[:,:,0].shape
             self.num_face_dofs = self.face_dof_positions[:,:,0].size
             dof_positions.append(self.face_dof_positions.reshape(-1,2))
         
         self.dof_positions = np.concatenate(dof_positions)
-                
             
-    def get_function(self, quadrature : ReferenceQuadrature, derivatives = []):
+    
+    def contravariant_piola_transform(self, y : NDArray):
+        """
+        Given an N x J x K x 2 array, perform a contravariant Piola transform.  
+        """
+        
+        mesh = self.mesh 
+        W = (mesh.cell_to_det_A)[:,np.newaxis,np.newaxis] * mesh.cell_to_A
+        y = np.einsum('nij,nlkj->nlki', W, y)
+        return y 
+    
+    
+    def covariant_piola_transform(self, y : NDArray):
+        """
+        Given an N x J x K x 2 array, perform a covariant Piola transform.  
+        """
+        
+        mesh = self.mesh 
+        W = np.transpose(mesh.cell_to_A_inv, axes=(0,2,1))
+        y = np.einsum('nij,nlkj->nlki', W, y)
+        return y 
+    
+            
+    def get_function(self, quadrature : ReferenceQuadrature, derivatives = [], transform='affine'):
         
         """
         Returns a quadrature function for a set of quadrature points. Derivatives for each coordinate dimension
@@ -202,8 +223,7 @@ class FunctionBuilder:
         # If derivatives aren't specified, just initialize empty lists for each range dimension
         if len(derivatives) == 0:
             derivatives = [[] for i in range(D)]
-        
-        
+
         symbol_dict = {'x' : 0, 'y' : 1}
         
         Y = []
@@ -222,29 +242,47 @@ class FunctionBuilder:
             """
             if self.aether_element.ref_element == 'triangle':
                 
+                A_inv = self.mesh.cell_to_A_inv
                 for coord_dim in itertools.product(*(indexes*len(ds))):
                     # Weights are products of entries of the transform matrix
-                    w = np.prod(self.mesh.A_inv[:, coord_dim, ds_indexes], axis=1)
+                    w = np.prod(A_inv[:, coord_dim, ds_indexes], axis=1)
                     du = self.aether_element.eval_basis(quad_points, ds, d=d)            
                     yi = w[:,np.newaxis,np.newaxis] * du
                     y_d.append(yi)
                 
                 y_d = np.array(y_d).sum(axis=0)
+                
             elif self.aether_element.ref_element == 'interval':
-                #w = self.mesh.cell_edge_lens 
-                # Need inverse of edge lens for transform?
-                du = self.aether_element.eval_basis(quad_points, ds, d=d)       
-            
+                # The 1d transformation case
+                du = self.aether_element.eval_basis(quad_points, ds, d=d)
+                w = (1. / self.mesh.edge_to_length)**len(ds)
+                y_d = w[:,np.newaxis,np.newaxis] * du
+                #print(yi.shape)
             
             Y.append(y_d)
         
-        # Combine any vector outputs into a single array
+        """
+        Combine any vector outputs into a single array. The resulting dimension of the array 
+        is N x J x K x D. N is the number of cells for an element defined on a cell, or 
+        the number of edges for an element defined on an interval. J is the number of of basis 
+        functions per mesh entity (edge or cell). K is the number of quadrature points.  D is the 
+        dimension of the range of each basis function (e.g. 1 for a scalar basis function or 2)
+        for a vector basis function. 
+        """
         Y = np.stack(Y, axis=-1)
         
+        # For H(div) elements use a contravariant Piola transform
+        if self.aether_element.continuity == 'H(div)':
+            Y = self.contravariant_piola_transform(Y)
+        elif self.aether_element.continuity == 'H(curl)':
+            # For H(curl) elements use a covariant Piola transform
+            Y = self.covariant_piola_transform(Y)
+            
+        
         # Extend quadrature to whole mesh 
-        #mesh_quad = MeshQuadrature(self.mesh, quadrature) 
+        mesh_quad = MeshQuadrature(self.mesh, quadrature) 
     
-        return Y
+        return Y, mesh_quad
         #f = QuadratureFunction(Y, mesh_quad, self)
         #return f
    

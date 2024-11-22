@@ -14,10 +14,12 @@ class Element:
         self.element = symfem.create_element(ref_element, type, degree)
         # Get basis function 
         self.basis_functions = self.element.get_basis_functions()
-         # Number of basis functions
-        self.N = len(self.basis_functions)
+        # Number of basis functions
+        self.num_basis_functions = len(self.basis_functions)
         # Number of components of basis functions (scalar v. vector)
         self.range_dim = self.element.range_dim
+        # Continuity of the element
+        self.continuity = self.element.continuity
         
         dof_dims, dof_entities = list(zip(*self.element.dof_entities()))
         self.dof_dims = np.array(dof_dims, dtype=int)
@@ -102,7 +104,7 @@ class Element:
         # List to store all evaluated basis functions
         Z = []
  
-        for i in range(self.N):
+        for i in range(self.num_basis_functions):
             # Get i-th basis function 
             f = self.basis_functions[i].as_sympy()
             
