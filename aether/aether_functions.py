@@ -4,7 +4,7 @@ import torch.nn as nn
 import itertools
 from aether.aether_element import Element
 from aether.aether_mesh import Mesh
-from aether.aether_quadrature import ReferenceQuadrature, MeshQuadrature
+from aether.aether_quadrature import ReferenceQuadrature, MeshQuadrature, TriangleEdgeQuadrature, TriangleQuadrature, IntervalQuadrature
 from numpy.typing import NDArray
 
 class QuadratureFunction(nn.Module):
@@ -278,11 +278,363 @@ class FunctionBuilder:
             # For H(curl) elements use a covariant Piola transform
             Y = self.covariant_piola_transform(Y)
             
-        
-        # Extend quadrature to whole mesh 
+        # Extend quadrature to entire mesh 
         mesh_quad = MeshQuadrature(self.mesh, quadrature) 
     
         return Y, mesh_quad
         #f = QuadratureFunction(Y, mesh_quad, self)
         #return f
-   
+        
+        
+    def eval_basis(
+        self, 
+        quad_points : NDArray,
+        derivatives = []
+    ):
+        """
+        Evaluates all finite element basis functions at a set of quadrature points.
+        """
+        
+        if self.aether_element.ref_element == 'triangle':
+            indexes = [[0,1]]
+        elif self.aether_element.ref_element == 'interval':
+            indexes=[[0]]
+        
+        # Dimension of the range
+        D = self.aether_element.range_dim
+        # If derivatives aren't specified, just initialize empty lists for each range dimension
+        if len(derivatives) == 0:
+            derivatives = [[] for i in range(D)]
+
+        symbol_dict = {'x' : 0, 'y' : 1}
+        
+        Y = []
+        for d in range(D):
+            
+            ds = derivatives[d]
+            ds_indexes = [symbol_dict[s] for s in ds]
+
+            # Evaluate all basis functions on each mesh cell. 
+            y_d = []
+            
+            """
+            Evaluating derivatives in physical coordinates requires some somwehat unpleasant 
+            chain ruling. See:
+            https://scicomp.stackexchange.com/questions/25196/implementing-higher-order-derivatives-for-finite-element 
+            """
+            if self.aether_element.ref_element == 'triangle':
+                
+                A_inv = self.mesh.cell_to_A_inv
+                for coord_dim in itertools.product(*(indexes*len(ds))):
+                    # Weights are products of entries of the transform matrix
+                    w = np.prod(A_inv[:, coord_dim, ds_indexes], axis=1)
+                    du = self.aether_element.eval_basis(quad_points, ds, d=d)            
+                    yi = w[:,np.newaxis,np.newaxis] * du
+                    y_d.append(yi)
+                
+                y_d = np.array(y_d).sum(axis=0)
+                
+            elif self.aether_element.ref_element == 'interval':
+                # The 1d transformation case
+                du = self.aether_element.eval_basis(quad_points, ds, d=d)
+                w = (1. / self.mesh.edge_to_length)**len(ds)
+                y_d = w[:,np.newaxis,np.newaxis] * du
+                #print(yi.shape)
+            
+            Y.append(y_d)
+            return Y 
+        
+        
+    def get_cell_function(
+        self,
+        triangle_quad : TriangleQuadrature,
+        interval_quad : IntervalQuadrature,
+        derivatives = []
+    ):
+        
+        element = self.element 
+        if not element.ref_element == 'triangle':
+            raise TypeError(f"The finite element must have a triangle reference element, but got {element.ref_element}.")
+        
+        """
+        First, evaluate each basis function at quadrature points on each cell. 
+        """
+        quad_points = triangle_quad.quad_points
+        Y = self.eval_basis(quad_points, derivatives)
+        self.Y_cell = Y 
+        
+        """
+        Then, evaluate each basis function at quadrature points on each edge. 
+        """
+        
+        x = interval_quad.quad_points
+        # Edge 0 
+        x0 = np.c_[1. - x, x]
+        Y0 = self.eval_basis(x0, derivatives)
+        
+        # Edge 1
+        x1 = np.c_[0.*x, 1. - x]
+        Y1 = self.eval_basis(x1, derivatives)
+        
+        # Edge 2 
+        x2 = np.c_[x, 0.*x]
+        Y2 = self.eval_basis(x2, derivatives)
+        
+
+class FunctionBuilder1:
+      
+    def __init__(self, 
+        mesh : Mesh,
+        interval_quad : IntervalQuadrature,
+        triangle_quad : TriangleQuadrature
+    ):
+            
+        """
+        Object used to create finite element functions with basis functions evaluated on 
+        particular quadratures. 
+
+        Parameters
+        ----------
+        mesh : Mesh
+            A mesh object.
+            
+        interval_quad : IntervalQuadrature
+            The quadrature rule to use on 1d entities (edges).
+            
+        triangle_quad : TriangleQuadrature
+            The quadrature rule to use on 2d entities (faces).
+            
+        """
+        
+        self.mesh = mesh
+        self.interval_quad = interval_quad
+        self.triangle_quad = triangle_quad 
+        
+    
+    
+    def get_function(self, element : Element, derivatives = [], entities = 'all'):
+        
+        """
+        Returns a quadrature function for a set of quadrature points. Derivatives for each coordinate dimension
+        can be passed in as additional arguments. 
+
+        Parameters
+        ----------
+     
+        derivatives : list of strings
+            A list of derivatives to take for each basis function. For example, use eval_func(points, ['x', 'y']) to get the xy partial 
+            derivatives. Can be left blank for no derivatives. 
+            
+        Returns
+        -------
+        QuadratureFunction
+            A quadrature function used to evaluate a finite element function at quadrature points given DOF values. 
+            
+        """
+        
+        quad_points = quadrature.quad_points
+        
+        if self.aether_element.ref_element == 'triangle':
+            indexes = [[0,1]]
+        elif self.aether_element.ref_element == 'interval':
+            indexes=[[0]]
+        
+        # Dimension of the range
+        D = self.aether_element.range_dim
+        # If derivatives aren't specified, just initialize empty lists for each range dimension
+        if len(derivatives) == 0:
+            derivatives = [[] for i in range(D)]
+
+        symbol_dict = {'x' : 0, 'y' : 1}
+        
+        Y = []
+        for d in range(D):
+            
+            ds = derivatives[d]
+            ds_indexes = [symbol_dict[s] for s in ds]
+
+            # Evaluate all basis functions on each mesh cell. 
+            y_d = []
+            
+            """
+            Evaluating derivatives in physical coordinates requires some somwehat unpleasant 
+            chain ruling. See:
+            https://scicomp.stackexchange.com/questions/25196/implementing-higher-order-derivatives-for-finite-element 
+            """
+            if self.aether_element.ref_element == 'triangle':
+                
+                A_inv = self.mesh.cell_to_A_inv
+                for coord_dim in itertools.product(*(indexes*len(ds))):
+                    # Weights are products of entries of the transform matrix
+                    w = np.prod(A_inv[:, coord_dim, ds_indexes], axis=1)
+                    du = self.aether_element.eval_basis(quad_points, ds, d=d)            
+                    yi = w[:,np.newaxis,np.newaxis] * du
+                    y_d.append(yi)
+                
+                y_d = np.array(y_d).sum(axis=0)
+                
+            elif self.aether_element.ref_element == 'interval':
+                # The 1d transformation case
+                du = self.aether_element.eval_basis(quad_points, ds, d=d)
+                w = (1. / self.mesh.edge_to_length)**len(ds)
+                y_d = w[:,np.newaxis,np.newaxis] * du
+                #print(yi.shape)
+            
+            Y.append(y_d)
+        
+        """
+        Combine any vector outputs into a single array. The resulting dimension of the array 
+        is N x J x K x D. N is the number of cells for an element defined on a cell, or 
+        the number of edges for an element defined on an interval. J is the number of of basis 
+        functions per mesh entity (edge or cell). K is the number of quadrature points.  D is the 
+        dimension of the range of each basis function (e.g. 1 for a scalar basis function or 2)
+        for a vector basis function. 
+        """
+        Y = np.stack(Y, axis=-1)
+        
+        # For H(div) elements use a contravariant Piola transform
+        if self.aether_element.continuity == 'H(div)':
+            Y = self.contravariant_piola_transform(Y)
+        elif self.aether_element.continuity == 'H(curl)':
+            # For H(curl) elements use a covariant Piola transform
+            Y = self.covariant_piola_transform(Y)
+            
+        # Extend quadrature to entire mesh 
+        mesh_quad = MeshQuadrature(self.mesh, quadrature) 
+    
+        return Y, mesh_quad
+        #f = QuadratureFunction(Y, mesh_quad, self)
+        #return f
+            
+    
+    def contravariant_piola_transform(self, y : NDArray):
+        """
+        Given an N x J x K x 2 array, perform a contravariant Piola transform.  
+        """
+        
+        mesh = self.mesh 
+        W = (mesh.cell_to_det_A)[:,np.newaxis,np.newaxis] * mesh.cell_to_A
+        y = np.einsum('nij,nlkj->nlki', W, y)
+        return y 
+    
+    
+    def covariant_piola_transform(self, y : NDArray):
+        """
+        Given an N x J x K x 2 array, perform a covariant Piola transform.  
+        """
+        
+        mesh = self.mesh 
+        W = np.transpose(mesh.cell_to_A_inv, axes=(0,2,1))
+        y = np.einsum('nij,nlkj->nlki', W, y)
+        return y 
+                
+        
+    def eval_basis(
+        self, 
+        entity_dim,
+        entity_index,
+        derivatives = []
+    ):
+        """
+        Evaluates all finite element basis functions at a set of quadrature points.
+        """
+        
+        if self.aether_element.ref_element == 'triangle':
+            indexes = [[0,1]]
+        elif self.aether_element.ref_element == 'interval':
+            indexes=[[0]]
+        
+        # Dimension of the range
+        D = self.aether_element.range_dim
+        # If derivatives aren't specified, just initialize empty lists for each range dimension
+        if len(derivatives) == 0:
+            derivatives = [[] for i in range(D)]
+
+        symbol_dict = {'x' : 0, 'y' : 1}
+        
+        Y = []
+        for d in range(D):
+            
+            ds = derivatives[d]
+            ds_indexes = [symbol_dict[s] for s in ds]
+
+            # Evaluate all basis functions on each mesh cell. 
+            y_d = []
+            
+            """
+            Evaluating derivatives in physical coordinates requires some somwehat unpleasant 
+            chain ruling. See:
+            https://scicomp.stackexchange.com/questions/25196/implementing-higher-order-derivatives-for-finite-element 
+            """
+            if self.aether_element.ref_element == 'triangle':
+                
+                A_inv = self.mesh.cell_to_A_inv
+                for coord_dim in itertools.product(*(indexes*len(ds))):
+                    # Weights are products of entries of the transform matrix
+                    w = np.prod(A_inv[:, coord_dim, ds_indexes], axis=1)
+                    du = self.aether_element.eval_basis(quad_points, ds, d=d)            
+                    yi = w[:,np.newaxis,np.newaxis] * du
+                    y_d.append(yi)
+                
+                y_d = np.array(y_d).sum(axis=0)
+                
+            elif self.aether_element.ref_element == 'interval':
+                # The 1d transformation case
+                du = self.aether_element.eval_basis(quad_points, ds, d=d)
+                w = (1. / self.mesh.edge_to_length)**len(ds)
+                y_d = w[:,np.newaxis,np.newaxis] * du
+                #print(yi.shape)
+            
+            Y.append(y_d)
+            return Y 
+        
+        
+    def get_cell_function(
+        self,
+        triangle_quad : TriangleQuadrature,
+        interval_quad : IntervalQuadrature,
+        derivatives = []
+    ):
+        
+        element = self.element 
+        if not element.ref_element == 'triangle':
+            raise TypeError(f"The finite element must have a triangle reference element, but got {element.ref_element}.")
+        
+        """
+        First, evaluate each basis function at quadrature points on each cell. 
+        """
+        quad_points = triangle_quad.quad_points
+        Y = self.eval_basis(quad_points, derivatives)
+        self.Y_cell = Y 
+        
+        """
+        Then, evaluate each basis function at quadrature points on each edge. 
+        """
+        
+        x = interval_quad.quad_points
+        # Edge 0 
+        x0 = np.c_[1. - x, x]
+        Y0 = self.eval_basis(x0, derivatives)
+        
+        # Edge 1
+        x1 = np.c_[0.*x, 1. - x]
+        Y1 = self.eval_basis(x1, derivatives)
+        
+        # Edge 2 
+        x2 = np.c_[x, 0.*x]
+        Y2 = self.eval_basis(x2, derivatives)
+        
+    
+    def get_edge_function(
+        self,
+        interval_quad : IntervalQuadrature,
+        derivatives = []
+    ):
+        
+        
+
+        
+        
+        
+        
+        

@@ -3,40 +3,42 @@ import symfem
 import sympy as sp
 from sympy import lambdify
 from numpy.typing import NDArray
+from aether.aether_reference_elements import ReferenceTriangle, ReferenceInterval
 
 class Element:
     
-    def __init__(self, type : str, degree : int, ref_element='triangle'):
+    def __init__(self, type : str, degree : int, ref_element_name='triangle'):
         
         # Type of reference element 
-        self.ref_element = ref_element 
+        self.ref_element_name = ref_element_name 
         # The symfem definition of the element
-        self.element = symfem.create_element(ref_element, type, degree)
+        self.element = symfem.create_element(ref_element_name, type, degree)
         # Get basis function 
         self.basis_functions = self.element.get_basis_functions()
         # Number of basis functions
         self.num_basis_functions = len(self.basis_functions)
-        # Number of components of basis functions (scalar v. vector)
+        # Number of components of basis functions (scalar 1 v. vector 2)
         self.range_dim = self.element.range_dim
-        # Continuity of the element
+        # Continuity of the element (e.g. C0, H(div), etc.)
         self.continuity = self.element.continuity
         
         dof_dims, dof_entities = list(zip(*self.element.dof_entities()))
         self.dof_dims = np.array(dof_dims, dtype=int)
         self.dof_entities = np.array(dof_entities, dtype=int)
         
-        if ref_element == 'interval':
-            self.num_vertices = 2
-            self.num_edges = 1
-            self.num_faces = 0
-        elif ref_element == 'triangle':
-            self.num_vertices = 3
-            self.num_edges = 3
-            self.num_faces = 1
+        if ref_element_name == 'interval':
+            self.ref_element = ReferenceInterval() 
+        elif ref_element_name == 'triangle':
+            self.ref_element = ReferenceTriangle()
+        else:
+            raise ValueError(
+                f"Only elements on intervals or triangles are currently supported"
+                f"Got element type {ref_element_name}."
+            )
             
-        self.dofs_per_vertex = int(np.sum(self.dof_dims == 0) / self.num_vertices)
-        self.dofs_per_edge = int(np.sum(self.dof_dims == 1) / self.num_edges)
-        if self.num_faces > 0:
+        self.dofs_per_vertex = int(np.sum(self.dof_dims == 0) / self.ref_element.num_vertices)
+        self.dofs_per_edge = int(np.sum(self.dof_dims == 1) / self.ref_element.num_edges)
+        if self.ref_element.num_faces > 0:
             self.dofs_per_face = int(np.sum(self.dof_dims == 2))
         else: 
             self.dofs_per_face = 0
@@ -44,9 +46,9 @@ class Element:
         
         # For each entity of a given type (face, edge, vertex)
         # create a list of its dof plot vertices 
-        vertex_dof_positions = [[] for i in range(self.num_vertices)]
-        edge_dof_positions = [[] for i in range(self.num_edges)]
-        face_dof_positions = [[] for i in range(self.num_faces)]
+        vertex_dof_positions = [[] for i in range(self.ref_element.num_vertices)]
+        edge_dof_positions = [[] for i in range(self.ref_element.num_edges)]
+        face_dof_positions = [[] for i in range(self.ref_element.num_faces)]
         for i in range(len(self.element.dof_entities())):
             dim, entity = self.element.dof_entities()[i]
             dof_x = self.element.dof_plot_positions()[i]
@@ -94,10 +96,10 @@ class Element:
         # Interval and triangle elements have different domains so 
         # make sure we have the correct format for points
         num_points = len(points)
-        if self.ref_element == 'triangle':
+        if self.ref_element_name == 'triangle':
             points = [points[:,0], points[:,1]] 
             domain = (x, y)
-        else:
+        elif self.ref_element_name == 'interval':
             points = [points.flatten()]
             domain = (x,)
         
