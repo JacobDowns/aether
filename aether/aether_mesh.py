@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
+import torch
 
 class Mesh:
     
@@ -20,7 +21,7 @@ class Mesh:
         """
         
         self.coordinates = coordinates
-        self.cells = cells
+        self.cell_to_vertices = cells
         self.get_edges()
         self.set_cell_to_edge_maps()
         self.set_cell_transforms()
@@ -29,18 +30,21 @@ class Mesh:
         self.set_edge_to_cells_map()
         
         self.num_vertices = len(self.coordinates)
-        self.num_cells = len(self.cells)
+        self.num_cells = len(self.cell_to_vertices)
         self.num_edges = len(self.edge_to_vertices)
         
         
     def get_edges(self):
+        
+        cells = self.cell_to_vertices
+        
         """"
         Get all unique edges, and create a map from each edge index
         to its two vertices in sorted (lower to higher vertex index) order.
         """
-        e0 = self.cells[:,[1,2]]
-        e1 = self.cells[:,[0,2]]
-        e2 = self.cells[:,[0,1]]
+        e0 = cells[:,[1,2]]
+        e1 = cells[:,[0,2]]
+        e2 = cells[:,[0,1]]
         
         e0.sort(axis=1)
         e1.sort(axis=1)
@@ -57,7 +61,7 @@ class Mesh:
         a lower to higher or higher to lower global index? 
         """
         
-        cells = self.cells  
+        cells = self.cell_to_vertices  
         edges = self.edge_to_vertices 
         
         """
@@ -135,7 +139,7 @@ class Mesh:
         Create affine maps from reference to physical elements and vice versa. 
         """
 
-        cells = self.cells 
+        cells = self.cell_to_vertices 
         coordinates = self.coordinates
         
         X = coordinates[:,0][cells]
@@ -178,7 +182,7 @@ class Mesh:
         """
         
         coordinates = self.coordinates
-        cells = self.cells 
+        cells = self.cell_to_vertices 
         
         # Tangent vectors
         t = coordinates[cells[:,[1,2,0]]] - coordinates[cells[:,[0,1,2]]]
@@ -267,3 +271,36 @@ class Mesh:
         W = (1. / self.cell_to_det_A)[:,np.newaxis,np.newaxis] * self.cell_to_A 
         y = np.einsum('nij,nklj->nklj', W, y)
         return y 
+    
+""""
+class TorchMesh:
+    """
+    Convenience wrapper that converts mesh information to appropriately typed torch tensors. 
+    """
+    
+    def __init__(self, mesh : Mesh, device='cpu'):
+        
+        mesh.coordinates = torch.tensor(mesh.coordinates, dtype=torch.float32, device=device)    
+        
+        # Cell maps and properties
+        self.cell_to_vertices = torch.tensor(mesh.cell_to_vertices, dtype=torch.int64, device=device)
+        self.cell_to_edges_orientation = torch.tensor(mesh.cell_to_edges_orientation, dtype=torch.int64, device=device)
+        self.cell_to_edges = torch.tensor(mesh.cell_to_edges, dtype=torch.int64, device=device)
+        self.cell_to_edge_tangents = torch.tensor(mesh.cell_to_edge_tangents, dtype=torch.float32, device=device)
+        self.cell_to_edge_normals = torch.tensor(mesh.cell_to_edge_normals, dtype=torch.float32, device=device)
+        self.cell_to_edge_lens = torch.tensor(mesh.edge_lens, dtype=torch.float32, device=device)
+        self.cell_to_edge_midpoints = torch.tensor(mesh.cell_to_edge_midpoints, dtype=torch.float32, device=device)
+        self.cell_to_area = torch.tensor(mesh.cell_to_area, dtype=torch.float32, device=device)
+        self.cell_to_centroid = torch.tensor(mesh.cell_to_centroid, dtype=torch.float32, device=device)
+        
+        # Edge maps and properties
+        self.edge_to_length = torch.tensor(mesh.edge_to_length, dtype=torch.float32, device=device) 
+        self.edge_to_midpoint = torch.tensor(mesh.edge_to_midpoint, dtype=torch.float32, device=device)
+        self.edge_to_tangent = torch.tensor(mesh.edge_to_tangent, dtype=torch.float32, device=device)
+        self.edge_to_normal = torch.tensor(mesh.edge_to_normal, dtype=torch.float32, device=device)
+        self.edge_to_cells_map = torch.tensor(mesh.edge_to_cells_map, dtype=torch.int64, device=device)
+        self.interior_edge_to_cells_map = torch.tensor(mesh.interior_edge_to_cells_map, dtype=torch.int64, device=device)
+        self.exterior_edge_to_cell_map = torch.tensor(mesh.exterior_edge_to_cell_map, dtype=torch.int64, device=device)
+        self.interior_edges = torch.tensor(mesh.interior_edges, dtype=torch.int64, device=device)
+        self.exterior_edges = torch.tensor(mesh.exterior_edges, dtype=torch.int64, device=device)
+"""

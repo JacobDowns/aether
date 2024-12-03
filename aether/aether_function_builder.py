@@ -1,10 +1,11 @@
 import numpy as np
 import itertools
 from aether.aether_element import Element
-from aether.aether_mesh import Mesh
+from aether.aether_mesh import Mesh, TorchMesh
 from aether.aether_quadrature import TriangleQuadrature, IntervalQuadrature, PointQuadrature, MeshQuadrature
+from aether.aether_functions import CellFunction
 from numpy.typing import NDArray
-        
+import torch 
 
 class FunctionBuilder:
       
@@ -35,6 +36,7 @@ class FunctionBuilder:
         self.interval_quad = interval_quad
         self.triangle_quad = triangle_quad 
         self.point_quad = PointQuadrature()
+        self.torch_mesh = TorchMesh(mesh)
         
       
     def eval_basis(
@@ -144,19 +146,24 @@ class FunctionBuilder:
         y = np.einsum('nij,nlkj->nlki', W, y)
         return y 
     
-    def create_function(self, element : Element, entity_dims=[0,1,2]):
+    
+    def create_function(self, element : Element, entity_dims=[1,2], device='cuda'):
         
         bases = {}
         quadratures = {}
         
-        if element.ref_element_name == 'triangle':
-            # Create a cell function 
-            
-            for entity_dim in entity_dims:
-                bases[entity_dim] = []
-                quadratures[entity_dim] = []
-                for entity_index in element.ref_element.entities:
-                    Y, mesh_quad = self.eval_basis(element, entity_dim, entity_index)
-                    bases[entity_dim].append(Y)
-                    quadratures[entity_dim].append(mesh_quad)
-        
+        for entity_dim in entity_dims:
+            bases[entity_dim] = []
+            quadratures[entity_dim] = []
+            for entity_index in element.ref_element.entities[entity_dim]:
+                Y, mesh_quad = self.eval_basis(element, entity_dim, entity_index)
+                Y = torch.tensor(Y, dtype=torch.float32, device=device)
+                bases[entity_dim].append(Y)
+                quadratures[entity_dim].append(mesh_quad)
+                    
+        #if element.ref_element_name == 'triangle':
+        #    pass        
+        #elif element.ref_element_name == 'interval':
+        #    pass
+        f = CellFunction(self.torch_mesh, element, bases, quadratures, device)      
+        return f

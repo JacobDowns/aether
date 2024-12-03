@@ -4,6 +4,7 @@ from numpy.typing import NDArray
 from abc import ABC
 from basix import CellType
 import basix
+import torch 
 
 class Quadrature:
     
@@ -147,7 +148,7 @@ class BasixIntervalQuadrature(IntervalQuadrature):
         
 class MeshQuadrature:
     
-    def __init__(self, mesh : Mesh, quadrature : Quadrature):
+    def __init__(self, mesh : Mesh, quadrature : Quadrature, device='cuda'):
         """
         Extends a quadrature rule on a reference element to the entire mesh. 
 
@@ -173,6 +174,6 @@ class MeshQuadrature:
         
         
         # All quadrature points on the mesh 
-        self.quad_points = mesh_quad_points  
+        self.quad_points = torch.tensor(mesh_quad_points, dtype=torch.float32, device=device)
         # Just copy over the quad weights for convenience 
-        self.quad_weights = self.quadrature.quad_weights 
+        self.quad_weights = torch.tensor(self.quadrature.quad_weights, dtype=torch.float32, device=device)
