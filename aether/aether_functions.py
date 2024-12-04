@@ -3,13 +3,14 @@ import torch
 import torch.nn as nn
 import itertools
 from aether.aether_element import Element
-from aether.aether_mesh import Mesh, TorchMesh
+from aether.aether_mesh import Mesh
 from aether.aether_quadrature import Quadrature
 from numpy.typing import NDArray
 
 class Function(nn.Module):
     
     def __init__(self, mesh, element, bases, quadratures, device='cuda'):
+        
         """
         Represents a finite element function with basis function evaluated at quadrature points.
 
@@ -100,15 +101,27 @@ class Function(nn.Module):
         
 class CellFunction(Function):
     
-    def __init__(self, mesh : TorchMesh, element : Element, bases, quadratures, device='cuda'):
+    def __init__(self, mesh : Mesh, element : Element, bases, quadratures, device='cuda'):
         
-        super().__init__(element, bases, quadratures, device)
+        super().__init__(mesh, element, bases, quadratures, device)
         
-        self.mesh = mesh 
-        self.element = element 
-        self.cell_to_edges_orientation = mesh.cell_to_edges_orientation.to(device)
-        self.cell_to_vertices = mesh.cell_to_vertices.to(device)
-        self.cell_to_edges = mesh.cell_to_edges[:,[1,2,0]].to(device)
+        self.cell_to_edges_orientation = torch.tensor(mesh.cell_to_edges_orientation, dtype=torch.int64, device=device)
+        self.cell_to_vertices = torch.tensor(mesh.cell_to_vertices, dtype=torch.int64, device=device)
+        self.cell_to_edges = torch.tensor(mesh.cell_to_edges[:,[1,2,0]], dtype=torch.int64, device=device)
+        
+    
+    def get_quad_points(self, entity_dim=2):
+        quad_points = []
+        quad_weights = []
+        
+        for quad in self.quadratures[entity_dim]:
+            quad_points.append(quad.quad_points)
+            quad_weights.append(quad.quad_weights)
+            
+        quad_points = torch.stack(quad_points, dim=1)
+        quad_weights = torch.stack(quad_weights, dim=1)
+        
+        return quad_points, quad_weights
         
     
     def forward(self, entity_dim = 2):
@@ -139,21 +152,15 @@ class CellFunction(Function):
         if self.num_face_dofs > 0:
             local_dofs.append(self.face_dofs)
             
-        # Compute weighted sums of basis functions
-        local_dofs = torch.column_stack(local_dofs)        
+        local_dofs = torch.column_stack(local_dofs)      
+        F = []
         
-        if entity_dim == 2:
-            y = self.bases[entity_dim]
-            f = local_dofs[:,:,None] * self.y
-            f = f.sum(axis=1)
-        else:
-            """
-            If we're evaluating the function on edges or vertices, then append the function 
-            evaluated on each subeneity.
-            """
-            for y_i in self.bases[entity_dim]:
-                f_i = local_dofs[:,:,None] * self.y
-                f_i = f.sum(axis=1)
+        for y_i in self.bases[entity_dim]:
+            f_i = local_dofs[:,:,None,None] * y_i
+            f_i = f_i.sum(axis=1)
+            print(f_i.shape)
+            F.append(f_i)
         
-    
-        return f
+        F = torch.stack(F, dim=1)
+        
+        return F

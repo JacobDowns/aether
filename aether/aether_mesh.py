@@ -274,9 +274,7 @@ class Mesh:
     
 """"
 class TorchMesh:
-    """
-    Convenience wrapper that converts mesh information to appropriately typed torch tensors. 
-    """
+
     
     def __init__(self, mesh : Mesh, device='cpu'):
         

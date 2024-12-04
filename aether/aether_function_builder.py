@@ -1,7 +1,7 @@
 import numpy as np
 import itertools
 from aether.aether_element import Element
-from aether.aether_mesh import Mesh, TorchMesh
+from aether.aether_mesh import Mesh
 from aether.aether_quadrature import TriangleQuadrature, IntervalQuadrature, PointQuadrature, MeshQuadrature
 from aether.aether_functions import CellFunction
 from numpy.typing import NDArray
@@ -36,7 +36,6 @@ class FunctionBuilder:
         self.interval_quad = interval_quad
         self.triangle_quad = triangle_quad 
         self.point_quad = PointQuadrature()
-        self.torch_mesh = TorchMesh(mesh)
         
       
     def eval_basis(
@@ -44,7 +43,8 @@ class FunctionBuilder:
         element : Element,
         entity_dim : 2,
         entity_index : 0,
-        derivatives = []
+        derivatives = [], 
+        device='cpu'
     ):
         """
         Evaluates all finite element basis functions at a set of quadrature points.
@@ -63,6 +63,7 @@ class FunctionBuilder:
             derivatives = [[] for i in range(D)]
 
         symbol_dict = {'x' : 0, 'y' : 1}
+        symbols = ['x', 'y']
         
         # Use the appropriate quadrature point for the dimension
         if entity_dim == 0:
@@ -93,11 +94,16 @@ class FunctionBuilder:
             """
             if element.ref_element_name == 'triangle':
                 
+
                 A_inv = self.mesh.cell_to_A_inv
                 for coord_dim in itertools.product(*(indexes*len(ds))):
+                    #print('coord_dim', coord_dim)
+                    derivative = [symbols[k] for k in coord_dim]
+                    #print('symbols', derivative)
+                    
                     # Weights are products of entries of the transform matrix
                     w = np.prod(A_inv[:, coord_dim, ds_indexes], axis=1)
-                    du = element.eval_basis(quad_points, ds, d=d)            
+                    du = element.eval_basis(quad_points, derivative, d=d)            
                     yi = w[:,np.newaxis,np.newaxis] * du
                     y_d.append(yi)
                 
@@ -121,7 +127,7 @@ class FunctionBuilder:
             Y = self.covariant_piola_transform(Y)
         
         # Extend the quadrature rule to the entire mesh
-        mesh_quad = MeshQuadrature(self.mesh, q)
+        mesh_quad = MeshQuadrature(self.mesh, q, device=device)
         return Y, mesh_quad 
         
     
@@ -147,7 +153,7 @@ class FunctionBuilder:
         return y 
     
     
-    def create_function(self, element : Element, entity_dims=[1,2], device='cuda'):
+    def create_function(self, element : Element, entity_dims=[1,2], derivatives = [], device='cuda'):
         
         bases = {}
         quadratures = {}
@@ -156,7 +162,7 @@ class FunctionBuilder:
             bases[entity_dim] = []
             quadratures[entity_dim] = []
             for entity_index in element.ref_element.entities[entity_dim]:
-                Y, mesh_quad = self.eval_basis(element, entity_dim, entity_index)
+                Y, mesh_quad = self.eval_basis(element, entity_dim, entity_index, derivatives)
                 Y = torch.tensor(Y, dtype=torch.float32, device=device)
                 bases[entity_dim].append(Y)
                 quadratures[entity_dim].append(mesh_quad)
@@ -165,5 +171,5 @@ class FunctionBuilder:
         #    pass        
         #elif element.ref_element_name == 'interval':
         #    pass
-        f = CellFunction(self.torch_mesh, element, bases, quadratures, device)      
+        f = CellFunction(self.mesh, element, bases, quadratures, device)      
         return f
