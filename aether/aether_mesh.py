@@ -213,6 +213,7 @@ class Mesh:
         """
         
         edge_to_cells_map = np.zeros((len(self.edge_to_vertices), 2), dtype=int) -1
+        edge_to_cell_edges = np.zeros((len(self.edge_to_vertices), 2), dtype=int) -1
         
         for i in range(len(self.cell_to_edges)):
             for j in range(len(self.cell_to_edges[i])):
@@ -220,27 +221,33 @@ class Mesh:
                 # Get the normal vector of this edge 
                 n_edge = self.edge_to_normal[e]
                 # Get the outward normal of this cell edge
-                n_cell = self.cell_to_edge_normals[i,j] 
+                n_cell = self.cell_to_edge_normals[i,j]
                
                 if np.dot(n_edge, n_cell) > 0.:
                     edge_to_cells_map[e,1] = i 
+                    edge_to_cell_edges[e,1] = j
                 else:
                     edge_to_cells_map[e,0] = i
+                    edge_to_cell_edges[e,0] = j
                     
-        self.edge_to_cells_map = edge_to_cells_map
+        self.edge_to_cells = edge_to_cells_map
+        self.edge_to_cell_edges = edge_to_cell_edges
         
         # Indexes of interior and exterior edges
-        indexes = np.logical_and(edge_to_cells_map[:,0] >= 0, edge_to_cells_map[:,0] >= 0)
+        indexes = np.logical_and(edge_to_cells_map[:,0] >= 0, edge_to_cells_map[:,1] >= 0)
         interior_edges = np.argwhere(indexes).flatten()
         exterior_edges = np.argwhere(~indexes).flatten()
         self.interior_edges = interior_edges
         self.exterior_edges = exterior_edges
         
         # Interior edges to two adjacent cells
-        self.interior_edge_to_cells_map = self.edge_to_cells_map[interior_edges]
-        # Exterior edge to one adjacent cell
-        self.exterior_edge_to_cell_map = self.edge_to_cells_map[exterior_edges].max(axis=1)
+        self.interior_edge_to_cells = self.edge_to_cells[interior_edges]
+        self.interior_edge_to_cell_edges = self.edge_to_cell_edges[interior_edges]
         
+        # Exterior edge to one adjacent cell
+        self.exterior_edge_to_cell = self.edge_to_cells[exterior_edges].max(axis=1)
+        self.exterior_edge_to_cell_edge = self.edge_to_cell_edges[exterior_edges].max(axis=1)
+
        
     def cell_transform(self, x : NDArray):
         """
@@ -272,7 +279,7 @@ class Mesh:
         y = np.einsum('nij,nklj->nklj', W, y)
         return y 
     
-""""
+""""#
 class TorchMesh:
 
     

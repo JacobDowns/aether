@@ -103,8 +103,6 @@ class Element:
             points = [points.flatten()]
             domain = (x,)
         
-        print(derivatives)
-        
         # List to store all evaluated basis functions
         Z = []
  

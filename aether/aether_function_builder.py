@@ -3,7 +3,7 @@ import itertools
 from aether.aether_element import Element
 from aether.aether_mesh import Mesh
 from aether.aether_quadrature import TriangleQuadrature, IntervalQuadrature, PointQuadrature, MeshQuadrature
-from aether.aether_functions import CellFunction
+from aether.aether_functions import CellFunction, EdgeFunction
 from numpy.typing import NDArray
 import torch 
 
@@ -89,7 +89,9 @@ class FunctionBuilder:
             
             """
             Evaluating derivatives in physical coordinates requires some somwehat unpleasant 
-            chain ruling. See:
+            chain ruling. Basically, derivatives in physical coordinates are weighted sums of 
+            derivatives in reference coordinates. The weights are given by products of entries 
+            in the transform Jacobian matrix. See:
             https://scicomp.stackexchange.com/questions/25196/implementing-higher-order-derivatives-for-finite-element 
             """
             if element.ref_element_name == 'triangle':
@@ -97,11 +99,7 @@ class FunctionBuilder:
 
                 A_inv = self.mesh.cell_to_A_inv
                 for coord_dim in itertools.product(*(indexes*len(ds))):
-                    #print('coord_dim', coord_dim)
                     derivative = [symbols[k] for k in coord_dim]
-                    #print('symbols', derivative)
-                    
-                    # Weights are products of entries of the transform matrix
                     w = np.prod(A_inv[:, coord_dim, ds_indexes], axis=1)
                     du = element.eval_basis(quad_points, derivative, d=d)            
                     yi = w[:,np.newaxis,np.newaxis] * du
@@ -111,6 +109,7 @@ class FunctionBuilder:
                 
             elif element.ref_element_name == 'interval':
                 # The 1d transformation case
+                
                 du = element.eval_basis(quad_points, ds, d=d)
                 w = (1. / self.mesh.edge_to_length)**len(ds)
                 y_d = w[:,np.newaxis,np.newaxis] * du
@@ -167,9 +166,9 @@ class FunctionBuilder:
                 bases[entity_dim].append(Y)
                 quadratures[entity_dim].append(mesh_quad)
                     
-        #if element.ref_element_name == 'triangle':
-        #    pass        
-        #elif element.ref_element_name == 'interval':
-        #    pass
-        f = CellFunction(self.mesh, element, bases, quadratures, device)      
+        if element.ref_element_name == 'triangle':
+            f = CellFunction(self.mesh, element, bases, quadratures, device)              
+        elif element.ref_element_name == 'interval':
+            f = EdgeFunction(self.mesh, element, bases, quadratures, device)        
+       
         return f

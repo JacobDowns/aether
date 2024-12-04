@@ -149,18 +149,18 @@ class ReferenceInterval(ReferenceElement):
         """
         
         self.vertices = [0, 1]
-        self.edges = [0, 1]   
+        self.edges = [0]   
         
         
         self.entities = {
             0 : [0, 1],
-            1 : [0, 1],
+            1 : [0],
             2 : [],
             3 : []
         }
         
         self.num_vertices = 2
-        self.num_edges = 2
+        self.num_edges = 1
         self.num_faces = 0
         self.num_tetrahedra = 0
         
