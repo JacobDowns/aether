@@ -1,14 +1,19 @@
+from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn as nn
 from aether.aether_element import Element
 from aether.aether_mesh import Mesh
 from aether.aether_quadrature import Quadrature
-from numpy.typing import NDArray
+from jaxtyping import Float
+from typing import Tuple
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from aether.aether_function_builder import FunctionBuilder 
 
 class Function(nn.Module):
     
-    def __init__(self, mesh, element, bases, quadratures, device='cuda'):
+    def __init__(self, func_builder : FunctionBuilder, element : Element, bases, quadratures):
         
         """
         Represents a finite element function with basis function evaluated at quadrature points.
@@ -24,8 +29,11 @@ class Function(nn.Module):
         func_builder : FunctionBuilder 
             A function builder object. 
         """
+        
         super(Function, self).__init__()
-        self.mesh = mesh 
+        self.func_builder = func_builder
+        self.mesh = func_builder.mesh  
+        device = func_builder.device
         self.element = element 
         self.bases = bases
         self.quadratures = quadratures
@@ -57,7 +65,7 @@ class Function(nn.Module):
             elif element.ref_element_name == 'interval':
                 t = self.element.edge_dof_positions[0].flatten()
 
-            self.edge_dof_positions = mesh.edge_transform(t)
+            self.edge_dof_positions = self.mesh.edge_transform(t)
             self.edge_dofs_shape = self.edge_dof_positions[:,:,0].shape
             self.num_edge_dofs = self.edge_dof_positions[:,:,0].size
             dof_positions.append(self.edge_dof_positions.reshape(-1,2))
@@ -66,7 +74,7 @@ class Function(nn.Module):
         self.num_face_dofs = 0
         self.face_dofs_shape = (0,0)
         if element.dofs_per_face > 0:
-            self.face_dof_positions = mesh.cell_transform(element.face_dof_positions[0])
+            self.face_dof_positions = self.mesh.cell_transform(element.face_dof_positions[0])
             self.face_dof_positions = np.stack([self.face_dof_positions[:,:,0], self.face_dof_positions[:,:,1]], axis=2)
             self.face_dofs_shape = self.face_dof_positions[:,:,0].shape
             self.num_face_dofs = self.face_dof_positions[:,:,0].size
@@ -90,54 +98,84 @@ class Function(nn.Module):
                 
     def get_quad_points(self, entity_dim=2):
         quad_points = []
-        quad_weights = []
         
         for quad in self.quadratures[entity_dim]:
             quad_points.append(quad.quad_points)
-            quad_weights.append(quad.quad_weights)
             
         quad_points = torch.stack(quad_points, dim=1)
-        quad_weights = torch.stack(quad_weights, dim=1)
         
-        return quad_points, quad_weights
+        return quad_points, quad.quad_weights
         
         
         
 class CellFunction(Function):
     
-    def __init__(self, mesh : Mesh, element : Element, bases, quadratures, device='cuda'):
+    def __init__(self, func_builder : FunctionBuilder, element : Element, bases, quadratures):
         
-        super(CellFunction, self).__init__(mesh, element, bases, quadratures, device)
+        super(CellFunction, self).__init__(func_builder, element, bases, quadratures)
         
-        self.cell_to_edges_orientation = torch.tensor(mesh.cell_to_edges_orientation, dtype=torch.int64, device=device)
-        self.cell_to_vertices = torch.tensor(mesh.cell_to_vertices, dtype=torch.int64, device=device)
-        self.cell_to_edges = torch.tensor(mesh.cell_to_edges[:,[1,2,0]], dtype=torch.int64, device=device)
-        #self.edge_to_cells = torch.tensor(mesh.edge_to_cell, dtype=torch.int64, device=device)
-        
-        #self.interior_edges = torch.tensor(mesh.interior_edges, dtype=torch.int64, device=device)
-        
-        # A map from each edge to the cells on the +/- side of the edge
-        print('a', mesh.edge_to_cells.shape)
-        print('b', mesh.edge_to_cells[mesh.interior_edges].shape)
-        self.interior_edge_to_cells = torch.tensor(mesh.edge_to_cells[mesh.interior_edges, :], dtype=torch.int64, device=device)
-        # For the +/- side of the edge, what is the local cell edge number (e.g. global to local edge map)?
-        self.interior_edge_to_cell_edge = torch.tensor(mesh.edge_to_cell_edges[mesh.interior_edges, :], dtype=torch.int64, device=device)
+        self.cell_to_vertices = func_builder.cell_to_vertices
+        self.cell_to_edges_orientation = func_builder.cell_to_edges_orientation        
+        self.cell_to_edges = func_builder.cell_to_edges
+        self.interior_edge_to_cells = func_builder.interior_edge_to_cells 
+        self.interior_edge_to_cell_edges = func_builder.interior_edge_to_cell_edges 
+        self.exterior_edge_to_cell = func_builder.exterior_edge_to_cell 
+        self.exterior_edge_to_cell_edge = func_builder.exterior_edge_to_cell_edge
     
     
-    def eval_interior_edges(self):
+    def eval_interior_edges(self, side='+') ->  Tuple[
+        Float[torch.tensor, 'entity sub_entity quad_point range_dim'],
+        Float[torch.tensor, 'quad_point'],
+        Float[torch.tensor, 'entity sub_entity quad_point coordinate']
+    ]:
         """
-        Evaluate the finite element function on +/- sides of edge and create an edge function. 
+        Evaluate the finite element function the + or - side of each interior edge. 
         """    
         
-        F = self.forward(1)
+        X, W, F = self.forward(1)
+        side_dict = {'+' : 0, '-' : 1}
+        index = side_dict[side]
+        E = F[self.interior_edge_to_cells[:,index], self.interior_edge_to_cell_edges[:,index], :, :]
+        X = X[self.interior_edge_to_cells[:,index], self.interior_edge_to_cell_edges[:,index], :, :]
+        X = X[:,None,:,:]
+        F = E[:,None,:,:]
         
-        
-        print(self.interior_edge_to_cells)
-        print(self.interior_edge_to_cell_edge)
-        
-        
+        return X, W, F
     
-    def forward(self, entity_dim = 2):
+    
+    def eval_exterior_edges(self) -> Tuple[
+        Float[torch.tensor, 'entity sub_entity quad_point range_dim'],
+        Float[torch.tensor, 'quad_point'],
+        Float[torch.tensor, 'entity sub_entity quad_point coordinate']
+    ]:
+        """
+        Evaluate the finite element function on each exterior edge. 
+        """ 
+        
+        X, W, F = self.forward(1)
+        E = F[self.exterior_edge_to_cell, self.exterior_edge_to_cell_edge, :, :]
+        X = X[self.exterior_edge_to_cell, self.exterior_edge_to_cell_edge, :, :]
+        X = X[:,None,:,:]
+        F = E[:,None,:,:]
+        
+        return X, W, F 
+    
+    
+    def eval_cells(self):
+        """
+        Evaluate the finite element function on each cell. 
+        """ 
+        
+        X, W, F = self.forward(2)
+        return X, W, F
+    
+    
+    def forward(self, entity_dim = 2) -> Tuple[
+        Float[torch.tensor, 'entity sub_entity quad_point range_dim'],
+        Float[torch.tensor, 'quad_point'],
+        Float[torch.tensor, 'entity sub_entity quad_point coordinate']
+    ]:
+        
         """
         Evaluate the finite element function at quadrature points given the degrees of freedom. 
 
@@ -182,21 +220,53 @@ class CellFunction(Function):
             f_i = f_i.sum(axis=1)
             F.append(f_i)
         
+        X, W = self.get_quad_points(entity_dim)
         F = torch.stack(F, dim=1)
         
-        return F
+        return X, W, F
 
 
 
 class EdgeFunction(Function):
     
-    def __init__(self, mesh : Mesh, element : Element, bases, quadratures, device='cuda'):
+    def __init__(self, func_builder : FunctionBuilder, element : Element, bases, quadratures):
         
-        super(EdgeFunction, self).__init__(mesh, element, bases, quadratures, device)
-        self.edge_to_vertices = torch.tensor(mesh.edge_to_vertices, dtype=torch.int64, device=device)
+        super(EdgeFunction, self).__init__(func_builder, element, bases, quadratures)
         
+        self.edge_to_vertices = func_builder.edge_to_vertices
+        self.interior_edges = func_builder.interior_edges 
+        self.exterior_edges = func_builder.exterior_edges
+        
+        
+    def eval_interior_edges(self)  -> Tuple[
+        Float[torch.tensor, 'entity sub_entity quad_point range_dim'],
+        Float[torch.tensor, 'quad_point'],
+        Float[torch.tensor, 'entity sub_entity quad_point coordinate']
+    ]:
+        X, W, F = self.forward(1)
+        X = X[self.interior_edges]
+        F = F[self.interior_edges]
+        
+        return X, W, F 
     
-    def forward(self, entity_dim = 1):
+    
+    def eval_exterior_edges(self) -> Tuple[
+        Float[torch.tensor, 'entity sub_entity quad_point range_dim'],
+        Float[torch.tensor, 'quad_point'],
+        Float[torch.tensor, 'entity sub_entity quad_point coordinate']
+    ]:  
+        X, W, F = self.forward(1)
+        X = X[self.exterior_edges]
+        F = F[self.exterior_edges]
+        
+        return X, W, F 
+    
+    
+    def forward(self, entity_dim = 1) -> Tuple[
+        Float[torch.tensor, 'entity sub_entity quad_point range_dim'],
+        Float[torch.tensor, 'quad_point'],
+        Float[torch.tensor, 'entity sub_entity quad_point coordinate']
+    ]:
         """
         Evaluate the finite element function at quadrature points given the degrees of freedom. 
 
@@ -228,5 +298,6 @@ class EdgeFunction(Function):
             F.append(f_i)
         
         F = torch.stack(F, dim=1)
+        X, W = self.get_quad_points(entity_dim)
         
-        return F        
+        return X, W, F

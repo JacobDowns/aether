@@ -225,10 +225,10 @@ class Mesh:
                
                 if np.dot(n_edge, n_cell) > 0.:
                     edge_to_cells_map[e,1] = i 
-                    edge_to_cell_edges[e,1] = j
+                    edge_to_cell_edges[e,1] = (j+2)%3
                 else:
                     edge_to_cells_map[e,0] = i
-                    edge_to_cell_edges[e,0] = j
+                    edge_to_cell_edges[e,0] = (j+2)%3
                     
         self.edge_to_cells = edge_to_cells_map
         self.edge_to_cell_edges = edge_to_cell_edges

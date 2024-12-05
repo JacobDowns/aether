@@ -12,7 +12,8 @@ class FunctionBuilder:
     def __init__(self, 
         mesh : Mesh,
         interval_quad : IntervalQuadrature,
-        triangle_quad : TriangleQuadrature
+        triangle_quad : TriangleQuadrature, 
+        device='cpu'
     ):
             
         """
@@ -36,8 +37,25 @@ class FunctionBuilder:
         self.interval_quad = interval_quad
         self.triangle_quad = triangle_quad 
         self.point_quad = PointQuadrature()
+        self.device = device
+         
+        """
+        Convert some of the maps we'll need to the appropriate device
+        """
+        self.cell_to_edges_orientation = torch.tensor(mesh.cell_to_edges_orientation, dtype=torch.int64, device=device)
+        self.cell_to_vertices = torch.tensor(mesh.cell_to_vertices, dtype=torch.int64, device=device)
+        self.cell_to_edges = torch.tensor(mesh.cell_to_edges[:,[1,2,0]], dtype=torch.int64, device=device)
+
+        self.interior_edge_to_cells = torch.tensor(mesh.interior_edge_to_cells, dtype=torch.int64, device=device)
+        self.interior_edge_to_cell_edges = torch.tensor(mesh.interior_edge_to_cell_edges, dtype=torch.int64, device=device)
         
-      
+        self.exterior_edge_to_cell = torch.tensor(mesh.exterior_edge_to_cell, dtype=torch.int64, device=device)
+        self.exterior_edge_to_cell_edge = torch.tensor(mesh.exterior_edge_to_cell_edge, dtype=torch.int64, device=device)
+        
+        self.edge_to_vertices = torch.tensor(mesh.edge_to_vertices, dtype=torch.int64, device=device)
+        self.interior_edges = torch.tensor(mesh.interior_edges, dtype=torch.int64, device=device)
+        self.exterior_edges = torch.tensor(mesh.exterior_edges, dtype=torch.int64, device=device)
+        
     def eval_basis(
         self, 
         element : Element,
@@ -152,10 +170,11 @@ class FunctionBuilder:
         return y 
     
     
-    def create_function(self, element : Element, entity_dims=[1,2], derivatives = [], device='cuda'):
+    def create_function(self, element : Element, entity_dims=[1,2], derivatives = []):
         
         bases = {}
         quadratures = {}
+        device = self.device
         
         for entity_dim in entity_dims:
             bases[entity_dim] = []
@@ -167,8 +186,8 @@ class FunctionBuilder:
                 quadratures[entity_dim].append(mesh_quad)
                     
         if element.ref_element_name == 'triangle':
-            f = CellFunction(self.mesh, element, bases, quadratures, device)              
+            f = CellFunction(self, element, bases, quadratures)              
         elif element.ref_element_name == 'interval':
-            f = EdgeFunction(self.mesh, element, bases, quadratures, device)        
+            f = EdgeFunction(self, element, bases, quadratures)        
        
         return f
