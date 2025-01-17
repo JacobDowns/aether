@@ -172,8 +172,7 @@ class MeshQuadrature:
         elif isinstance(quadrature, IntervalQuadrature):
             mesh_quad_points = mesh.edge_transform(reference_points)
         
-        
         # All quadrature points on the mesh 
-        self.quad_points = torch.tensor(mesh_quad_points, dtype=torch.float32, device=device)
+        self.quad_points = mesh_quad_points 
         # Just copy over the quad weights for convenience 
-        self.quad_weights = torch.tensor(self.quadrature.quad_weights, dtype=torch.float32, device=device)
+        self.quad_weights = quadrature.quad_weights

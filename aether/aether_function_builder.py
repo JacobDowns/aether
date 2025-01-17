@@ -6,6 +6,7 @@ from aether.aether_quadrature import TriangleQuadrature, IntervalQuadrature, Poi
 from aether.aether_functions import CellFunction, EdgeFunction
 from numpy.typing import NDArray
 import torch 
+from typing import Optional
 
 class FunctionBuilder:
       
@@ -143,8 +144,9 @@ class FunctionBuilder:
         elif element.continuity == 'H(curl)':
             Y = self.covariant_piola_transform(Y)
         
+        
         # Extend the quadrature rule to the entire mesh
-        mesh_quad = MeshQuadrature(self.mesh, q, device=device)
+        mesh_quad = MeshQuadrature(self.mesh, q)
         return Y, mesh_quad 
         
     
@@ -170,24 +172,13 @@ class FunctionBuilder:
         return y 
     
     
-    def create_function(self, element : Element, entity_dims=[1,2], derivatives = []):
+    def create_function(self, element : Element):
         
-        bases = {}
-        quadratures = {}
-        device = self.device
-        
-        for entity_dim in entity_dims:
-            bases[entity_dim] = []
-            quadratures[entity_dim] = []
-            for entity_index in element.ref_element.entities[entity_dim]:
-                Y, mesh_quad = self.eval_basis(element, entity_dim, entity_index, derivatives)
-                Y = torch.tensor(Y, dtype=torch.float32, device=device)
-                bases[entity_dim].append(Y)
-                quadratures[entity_dim].append(mesh_quad)
-                    
         if element.ref_element_name == 'triangle':
-            f = CellFunction(self, element, bases, quadratures)              
+            f = CellFunction(self, element)              
         elif element.ref_element_name == 'interval':
-            f = EdgeFunction(self, element, bases, quadratures)        
+            f = EdgeFunction(self, element)        
        
         return f
+    
+ 

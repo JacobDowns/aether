@@ -278,34 +278,3 @@ class Mesh:
         W = (1. / self.cell_to_det_A)[:,np.newaxis,np.newaxis] * self.cell_to_A 
         y = np.einsum('nij,nklj->nklj', W, y)
         return y 
-    
-""""#
-class TorchMesh:
-
-    
-    def __init__(self, mesh : Mesh, device='cpu'):
-        
-        mesh.coordinates = torch.tensor(mesh.coordinates, dtype=torch.float32, device=device)    
-        
-        # Cell maps and properties
-        self.cell_to_vertices = torch.tensor(mesh.cell_to_vertices, dtype=torch.int64, device=device)
-        self.cell_to_edges_orientation = torch.tensor(mesh.cell_to_edges_orientation, dtype=torch.int64, device=device)
-        self.cell_to_edges = torch.tensor(mesh.cell_to_edges, dtype=torch.int64, device=device)
-        self.cell_to_edge_tangents = torch.tensor(mesh.cell_to_edge_tangents, dtype=torch.float32, device=device)
-        self.cell_to_edge_normals = torch.tensor(mesh.cell_to_edge_normals, dtype=torch.float32, device=device)
-        self.cell_to_edge_lens = torch.tensor(mesh.edge_lens, dtype=torch.float32, device=device)
-        self.cell_to_edge_midpoints = torch.tensor(mesh.cell_to_edge_midpoints, dtype=torch.float32, device=device)
-        self.cell_to_area = torch.tensor(mesh.cell_to_area, dtype=torch.float32, device=device)
-        self.cell_to_centroid = torch.tensor(mesh.cell_to_centroid, dtype=torch.float32, device=device)
-        
-        # Edge maps and properties
-        self.edge_to_length = torch.tensor(mesh.edge_to_length, dtype=torch.float32, device=device) 
-        self.edge_to_midpoint = torch.tensor(mesh.edge_to_midpoint, dtype=torch.float32, device=device)
-        self.edge_to_tangent = torch.tensor(mesh.edge_to_tangent, dtype=torch.float32, device=device)
-        self.edge_to_normal = torch.tensor(mesh.edge_to_normal, dtype=torch.float32, device=device)
-        self.edge_to_cells_map = torch.tensor(mesh.edge_to_cells_map, dtype=torch.int64, device=device)
-        self.interior_edge_to_cells_map = torch.tensor(mesh.interior_edge_to_cells_map, dtype=torch.int64, device=device)
-        self.exterior_edge_to_cell_map = torch.tensor(mesh.exterior_edge_to_cell_map, dtype=torch.int64, device=device)
-        self.interior_edges = torch.tensor(mesh.interior_edges, dtype=torch.int64, device=device)
-        self.exterior_edges = torch.tensor(mesh.exterior_edges, dtype=torch.int64, device=device)
-"""

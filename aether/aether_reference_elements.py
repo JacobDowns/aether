@@ -92,6 +92,7 @@ class ReferenceTriangle(ReferenceElement):
         self.num_edges = 3
         self.num_faces = 1
         self.num_tetrahedra = 0
+        self.dimension = 2
         
     
     def map_quadrature_to_entity(self, quadrature : Quadrature, entity_dim = 2, entity_index = 0) -> TriangleQuadrature:
@@ -163,6 +164,7 @@ class ReferenceInterval(ReferenceElement):
         self.num_edges = 1
         self.num_faces = 0
         self.num_tetrahedra = 0
+        self.dimension = 1
         
         
     def map_quadrature_to_entity(self, quadrature : Quadrature, entity_dim = 1, entity_index = 0):

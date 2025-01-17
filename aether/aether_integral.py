@@ -37,7 +37,7 @@ class TestIntegral(nn.Module):
         # An array representing orientation of each edge
         self.faces_to_edge_orientation = torch.tensor(mesh.faces_to_edge_orientation, dtype=torch.int64, device=device)
         
-        # A tensor containing a list of test function evaluated at quadrature weights 
+        # A tensor containing a list of test functions evaluated at quadrature weights 
         self.v_x = v.y
         
         # Quadrature weights
